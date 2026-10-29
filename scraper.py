@@ -75,7 +75,7 @@ PRIORITY = {
     "futbol": [
         # España
         r"^la ?liga ea", r"^copa del rey$", r"^supercopa de espana$", r"^la ?liga hypermotion", r"^primera federacion$",
-        r"^copa de la reina", r"^liga f$", r"^segunda federacion$", r"^tercera federacion$",
+        r"^segunda federacion$", r"^tercera federacion$",
         # Selecciones y Europa
         r"^mundial$|^copa del mundo$|^fifa mundial$", r"^eurocopa$", r"clasificacion (mundial|eurocopa)", r"^uefa nations league$",
         r"amistos", r"^champions league$", r"^europa league$", r"^conference league$", r"supercopa de europa|uefa super cup",
@@ -95,8 +95,6 @@ PRIORITY = {
         r"^copa libertadores$", r"^copa sudamericana$", r"^liga mx$", r"^primera division argentina$|^liga profesional argentina",
         r"^copa argentina$", r"^serie a brasil$|^brasileirao$", r"^copa do brasil$", r"^mls$", r"^liga colombiana$",
         r"concacaf champions",
-        # Femenino de primer nivel
-        r"^champions league femenina$", r"^fa women s super league$",
     ],
     "baloncesto": [r"^nba$", r"^euroliga$", r"^liga endesa$", r"^copa del rey$", r"^supercopa", r"^eurocup$",
                    r"^basketball champions league$", r"^fiba europe cup$", r"^primera feb$", r"^wnba$"],
@@ -104,6 +102,12 @@ PRIORITY = {
     "motos": [r"^motogp$", r"^moto2$", r"^moto3$", r"superbike"],
     "coches": [r"^formula 1$", r"^formula 2$", r"^formula 3$"],
 }
+
+
+# Siempre al fondo: primero cantera/juveniles y, lo último, todo lo femenino
+RE_YOUTH = re.compile(r"sub ?\d|\bu ?\d\d\b|juvenil|youth|primavera|academy|cadete|infantil|reserva|proyeccion|junioren|liga u$")
+RE_WOMEN = re.compile(r"femenin|women|frauen|femminile|feminine|feminin|femenil|damallsvenskan|^liga f$|copa de la reina|"
+                      r"\bwnba\b|\bnwsl\b|\bd1 feminine|usl super league|liga bpi")
 
 
 def clean_channel(name):
@@ -364,7 +368,8 @@ def build(rows_by_site, sport, shared_logos=frozenset()):
     prio = [re.compile(rx) for rx in PRIORITY.get(sport, [])]
     def prio_of(cid):
         n = norm_name(comps[cid]["n"])
-        return next((i for i, rx in enumerate(prio) if rx.search(n)), len(prio))
+        tier = 2 if RE_WOMEN.search(n) else 1 if RE_YOUTH.search(n) else 0
+        return tier, next((i for i, rx in enumerate(prio) if rx.search(n)), len(prio))
     by_pop = sorted(pop, key=lambda c: -sum(pop[c]) / len(pop[c]) - 0.02 * len(pop[c]))
     for rank, cid in enumerate(sorted(by_pop, key=prio_of)):  # sort estable: dentro de cada nivel, relevancia
         comps[cid]["o"] = rank
