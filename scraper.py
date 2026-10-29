@@ -73,23 +73,24 @@ RE_REGIONAL = re.compile(
 # Expresiones sobre el nombre normalizado de la competición; lo no listado va detrás, por relevancia.
 PRIORITY = {
     "futbol": [
-        # España
-        r"^la ?liga ea", r"^copa del rey$", r"^supercopa de espana$", r"^la ?liga hypermotion", r"^primera federacion$",
-        r"^segunda federacion$", r"^tercera federacion$",
-        # Selecciones y Europa
-        r"^mundial$|^copa del mundo$|^fifa mundial$", r"^eurocopa$", r"clasificacion (mundial|eurocopa)", r"^uefa nations league$",
-        r"amistos", r"^champions league$", r"^europa league$", r"^conference league$", r"supercopa de europa|uefa super cup",
-        r"mundial de clubes",
-        # Inglaterra
-        r"^premier league$", r"^fa cup$|^copa fa$|^copa de inglaterra$", r"^efl carabao cup$|^copa de la liga inglesa",
-        r"community shield", r"^championship$", r"^league one$", r"^league two$", r"^efl trophy$", r"^national league$",
-        # Italia, Alemania, Francia, Portugal
-        r"^serie a italiana$", r"^coppa italia$|^copa de italia$", r"supercoppa|supercopa de italia", r"^serie b italiana$",
-        r"^bundesliga$", r"^dfb pokal$|^copa de alemania$", r"^2 bundesliga$", r"^3 liga$",
-        r"^francia ligue 1$|^ligue 1$", r"^copa de francia$|^coupe de france$", r"^ligue 2$",
-        r"^liga portuguesa$", r"^copa de portugal$|^taca de portugal$", r"^allianz cup$", r"^liga portugal 2$",
+        # Europa de clubes y selecciones
+        r"^champions league$", r"^europa league$", r"^conference league$", r"supercopa de europa|uefa super cup",
+        r"mundial de clubes", r"^mundial$|^copa del mundo$|^fifa mundial$", r"^eurocopa$", r"clasificacion (mundial|eurocopa)",
+        r"^uefa nations league$", r"amistos",
+        # Grandes ligas
+        r"^la ?liga ea", r"^premier league$", r"^serie a italiana$", r"^bundesliga$", r"^francia ligue 1$|^ligue 1$",
+        r"^liga portuguesa$", r"^eredivisie$",
+        # Copas nacionales
+        r"^copa del rey$", r"^supercopa de espana$", r"^fa cup$|^copa fa$|^copa de inglaterra$",
+        r"^efl carabao cup$|^copa de la liga inglesa", r"community shield", r"^coppa italia$|^copa de italia$",
+        r"supercoppa|supercopa de italia", r"^dfb pokal$|^copa de alemania$", r"^copa de francia$|^coupe de france$",
+        r"^copa de portugal$|^taca de portugal$", r"^allianz cup$",
+        # Segundas divisiones y categorías inferiores
+        r"^la ?liga hypermotion", r"^championship$", r"^serie b italiana$", r"^2 bundesliga$", r"^ligue 2$", r"^liga portugal 2$",
+        r"^primera federacion$", r"^segunda federacion$", r"^tercera federacion$", r"^league one$", r"^league two$",
+        r"^efl trophy$", r"^national league$", r"^3 liga$",
         # Resto de Europa
-        r"^eredivisie$", r"^jupiler pro league$", r"^superliga turca$", r"^premiership$", r"^scottish", r"^superliga grecia$",
+        r"^jupiler pro league$", r"^superliga turca$", r"^premiership$", r"^scottish", r"^superliga grecia$",
         r"^saudi pro league$",
         # América
         r"^copa libertadores$", r"^copa sudamericana$", r"^liga mx$", r"^primera division argentina$|^liga profesional argentina",
