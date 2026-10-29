@@ -2,7 +2,7 @@
 
 const LANGS = [
   { k: "es", f: "🇪🇸", n: "Castellano" },
-  { k: "lat", f: "🌎", s: "LAT", n: "Español latino" },
+  { k: "lat", f: "🇲🇽", n: "Español latino" },
   { k: "us", f: "🇺🇸", n: "EE. UU. (inglés y español)" },
   { k: "en", f: "🇬🇧", n: "Inglés (Reino Unido)" },
   { k: "de", f: "🇩🇪", n: "Alemán" },
@@ -13,8 +13,17 @@ const LANGS = [
   { k: "int", f: "🌐", n: "Internacional (YouTube, OneFootball…)" },
 ];
 const LANG = Object.fromEntries(LANGS.map(l => [l.k, l]));
+// d: duración aproximada en minutos (para marcar "EN VIVO" y atenuar lo ya terminado)
+const SPORTS = [
+  { k: "futbol", f: "⚽", n: "Fútbol", d: 115 },
+  { k: "baloncesto", f: "🏀", n: "Baloncesto", d: 140 },
+  { k: "tenis", f: "🎾", n: "Tenis", d: 150 },
+  { k: "motos", f: "🏍️", n: "Motociclismo", d: 60 },
+  { k: "coches", f: "🏎️", n: "Automovilismo (F1…)", d: 120 },
+];
+const SPORT = Object.fromEntries(SPORTS.map(x => [x.k, x]));
+const sportOf = compId => compId.includes(":") ? compId.split(":")[0] : "futbol";
 const LOGO = id => id ? `https://static.futbolenlatv.com/img/32/${id}.webp` : "";
-const MATCH_LEN = 115 * 60;
 
 /* ---------- estado persistente ---------- */
 const store = {
@@ -22,6 +31,7 @@ const store = {
   set(k, v) { try { localStorage.setItem("ptv." + k, JSON.stringify(v)); } catch {} },
 };
 const S = {
+  sports: store.get("sports", ["futbol"]),
   langs: store.get("langs", ["es", "lat", "en"]),
   onlyTv: store.get("onlyTv", true),
   favTeams: store.get("favTeams", []),   // [{id, n, l}]
@@ -30,12 +40,23 @@ const S = {
   closed: new Set(store.get("closed", [])),
 };
 const save = () => {
-  store.set("langs", S.langs); store.set("onlyTv", S.onlyTv);
+  store.set("sports", S.sports); store.set("langs", S.langs); store.set("onlyTv", S.onlyTv);
   store.set("favTeams", S.favTeams); store.set("favComps", S.favComps);
   store.set("showOthers", S.showOthers); store.set("closed", [...S.closed]);
 };
 
-let DATA = null;
+const SD = {};      // datos por deporte, tal cual llegan
+let DATA = null;   // unión de los deportes seleccionados
+function mergeData() {
+  const parts = S.sports.map(k => SD[k]).filter(Boolean);
+  if (!parts.length) { DATA = S.sports.length ? null : { comps: {}, teams: {}, matches: [], generated: 0 }; return; }
+  DATA = {
+    generated: Math.min(...parts.map(p => p.generated)),
+    comps: Object.assign({}, ...parts.map(p => p.comps)),
+    teams: Object.assign({}, ...parts.map(p => p.teams)),
+    matches: parts.flatMap(p => p.matches.map(m => (m.s = p.sport, m))).sort((x, y) => x.t - y.t),
+  };
+}
 let dayIdx = 0;
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -64,9 +85,20 @@ function renderDays() {
     `<button class="day${i === dayIdx ? " on" : ""}" data-d="${i}">${dayLabel(i)}</button>`).join("");
   el.querySelector(".on")?.scrollIntoView({ inline: "center", block: "nearest" });
 }
+function renderSports() {
+  $("#sports").innerHTML = SPORTS.map(x =>
+    `<button class="flag sport${S.sports.includes(x.k) ? " on" : ""}" data-s="${x.k}" title="${esc(x.n)}">${x.f}</button>`).join("");
+}
+$("#sports").addEventListener("click", e => {
+  const b = e.target.closest("[data-s]"); if (!b) return;
+  const k = b.dataset.s;
+  S.sports = S.sports.includes(k) ? S.sports.filter(x => x !== k) : SPORTS.map(x => x.k).filter(x => x === k || S.sports.includes(x));
+  save(); renderSports(); mergeData(); renderList(); renderFoot();
+  if (S.sports.includes(k) && !SD[k]) loadSport(k).then(() => { mergeData(); renderList(); renderFoot(); });
+});
 function renderLangs() {
   $("#langs").innerHTML =
-    LANGS.map(l => `<button class="flag${S.langs.includes(l.k) ? " on" : ""}" data-l="${l.k}" title="${esc(l.n)}">${l.f}${l.s ? `<small>${l.s}</small>` : ""}</button>`).join("") +
+    LANGS.map(l => `<button class="flag${S.langs.includes(l.k) ? " on" : ""}" data-l="${l.k}" title="${esc(l.n)}">${l.f}</button>`).join("") +
     `<button class="flag tv${S.onlyTv ? " on" : ""}" data-tv="1" title="Ocultar partidos sin canal en tus idiomas">📺 Con TV</button>`;
 }
 $("#days").addEventListener("click", e => {
@@ -89,17 +121,17 @@ function visibleChans(m) {
 }
 function matchHTML(m) {
   const T = DATA.teams, h = T[m.h] || { n: "?" }, a = T[m.a] || { n: "?" };
-  const t = now();
-  const live = t >= m.t && t < m.t + MATCH_LEN, done = t >= m.t + MATCH_LEN;
+  const t = now(), len = (SPORT[m.s]?.d || 115) * 60;
+  const live = t >= m.t && t < m.t + len, done = t >= m.t + len;
   const vc = visibleChans(m);
   const chans = vc.length
     ? vc.map(([k, cs]) => `<span class="chip"><b>${LANG[k].f}</b>${esc(cs.slice(0, 3).join(" · "))}${cs.length > 3 ? ` +${cs.length - 3}` : ""}</span>`).join("")
     : `<span class="nochan">Sin canal en tus idiomas</span>`;
   return `<button class="m${done ? " done" : ""}" data-m="${esc(m.id)}">
     <div class="time${live ? " live" : ""}">${live ? "EN VIVO" : fmtTime(m.t)}</div>
-    <div class="teams">
+    <div class="teams">${m.e ? `<div class="team ev"><span>${esc(m.e)}</span></div>` : `
       <div class="team${isFavTeam(m.h) ? " fav" : ""}"><img src="${LOGO(h.l)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span>${esc(h.n)}</span></div>
-      <div class="team${isFavTeam(m.a) ? " fav" : ""}"><img src="${LOGO(a.l)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span>${esc(a.n)}</span></div>
+      <div class="team${isFavTeam(m.a) ? " fav" : ""}"><img src="${LOGO(a.l)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span>${esc(a.n)}</span></div>`}
       ${m.r ? `<div class="rnd">${esc(m.r)}</div>` : ""}
     </div>
     <div class="chans">${chans}</div>
@@ -110,7 +142,7 @@ function compHTML(key, title, logo, ms) {
   return `<div class="comp${closed ? " closed" : ""}" data-ck="${esc(key)}">
     <button class="comp-h" data-toggle="${esc(key)}">
       ${logo ? `<img src="${LOGO(logo)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span style="width:20px;text-align:center;color:var(--star)">★</span>`}
-      <span class="n">${esc(title)}</span><span class="cnt">${ms.length}</span>
+      <span class="n">${S.sports.length > 1 && key !== "__mine" ? SPORT[sportOf(key)].f + " " : ""}${esc(title)}</span><span class="cnt">${ms.length}</span>
       <svg class="chev" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
     </button>
     ${ms.map(matchHTML).join("")}
@@ -122,6 +154,7 @@ function renderList() {
   $("#pane-next").innerHTML = dayIdx < 6 ? dayHTML(dayIdx + 1) : "";
 }
 function dayHTML(di) {
+  if (!S.sports.length) return `<div class="empty"><b>Ningún deporte elegido</b>Toca arriba ⚽ 🏀 🎾 🏍️ 🏎️ para ver sus partidos.</div>`;
   if (!DATA) return `<div class="empty"><b>Cargando…</b></div>`;
   const from = startOfDay(di), to = startOfDay(di + 1);
   const day = DATA.matches.filter(m => m.t >= from && m.t < to);
@@ -144,7 +177,8 @@ function dayHTML(di) {
 
   if (S.showOthers) {
     const others = [...byComp.keys()].filter(c => !isFavComp(c))
-      .sort((x, y) => (DATA.comps[x]?.o ?? 999) - (DATA.comps[y]?.o ?? 999));
+      .sort((x, y) => SPORTS.findIndex(z => z.k === sportOf(x)) - SPORTS.findIndex(z => z.k === sportOf(y))
+        || (DATA.comps[x]?.o ?? 999) - (DATA.comps[y]?.o ?? 999));
     if (others.length) {
       if (html) html += `<div class="sec-title">Todas las competiciones</div>`;
       for (const c of others) html += compHTML(c, DATA.comps[c]?.n || c, DATA.comps[c]?.l, byComp.get(c));
@@ -264,17 +298,18 @@ function openMatch(m) {
     openSheet(`
       <div class="sh-head">
         <div class="c">${esc(c.n)}${m.r ? " · " + esc(m.r) : ""}</div>
+        ${m.e ? `<div class="vs"><div><img src="${LOGO(c.l)}" alt="" onerror="this.style.visibility='hidden'">${esc(m.e)}<span class="t">${fmtTime(m.t)}</span></div></div>` : `
         <div class="vs">
           <div><img src="${LOGO(h.l)}" alt="" onerror="this.style.visibility='hidden'">${esc(h.n)}</div>
           <span class="t">${fmtTime(m.t)}</span>
           <div><img src="${LOGO(a.l)}" alt="" onerror="this.style.visibility='hidden'">${esc(a.n)}</div>
-        </div>
+        </div>`}
         <div class="c" style="text-transform:capitalize">${esc(d)}</div>
       </div>
       ${langs}
-      <div class="btns">
+      <div class="btns">${m.e ? "" : `
         <button class="btn" data-ft="${esc(m.h)}"><img src="${LOGO(h.l)}" alt="" onerror="this.style.visibility='hidden'">Seguir a ${esc(h.n)}${star(isFavTeam(m.h))}</button>
-        <button class="btn" data-ft="${esc(m.a)}"><img src="${LOGO(a.l)}" alt="" onerror="this.style.visibility='hidden'">Seguir a ${esc(a.n)}${star(isFavTeam(m.a))}</button>
+        <button class="btn" data-ft="${esc(m.a)}"><img src="${LOGO(a.l)}" alt="" onerror="this.style.visibility='hidden'">Seguir a ${esc(a.n)}${star(isFavTeam(m.a))}</button>`}
         <button class="btn" data-fc="${esc(m.c)}"><img src="${LOGO(c.l)}" alt="" onerror="this.style.visibility='hidden'">Competición favorita: ${esc(c.n)}${star(isFavComp(m.c))}</button>
       </div>`);
   };
@@ -291,20 +326,20 @@ function favBody() {
         : `<p class="hint">Aún no sigues a ningún equipo. Búscalo abajo o tócalo en cualquier partido.</p>`;
       if (q.length >= 2 && DATA) {
         const res = Object.entries(DATA.teams).filter(([id, t]) => !isFavTeam(id) && norm(t.n).includes(q)).slice(0, 40);
-        body += `<p class="hint">Resultados (equipos con partido esta semana)</p>` +
+        body += `<p class="hint">Resultados (equipos y jugadores con partido esta semana en los deportes elegidos)</p>` +
           (res.map(([id, t]) => `<div class="row"><img src="${LOGO(t.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${esc(t.n)}</span><button class="act" data-ft="${esc(id)}">☆</button></div>`).join("") || `<p class="hint">Nada.</p>`);
       }
     } else {
       body += S.favComps.length
         ? `<p class="hint">Arrastra ☰ para cambiar el orden en que salen.</p><div id="sortable">` +
-          S.favComps.map((c, i) => `<div class="row" data-i="${i}"><span class="handle">☰</span><img src="${LOGO(DATA?.comps[c.id]?.l || c.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${esc(DATA?.comps[c.id]?.n || c.n)}</span><button class="act star" data-fc="${esc(c.id)}">★</button></div>`).join("") + `</div>`
+          S.favComps.map((c, i) => `<div class="row" data-i="${i}"><span class="handle">☰</span><img src="${LOGO(DATA?.comps[c.id]?.l || c.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${sportOf(c.id) !== "futbol" ? SPORT[sportOf(c.id)].f + " " : ""}${esc(DATA?.comps[c.id]?.n || c.n)}</span><button class="act star" data-fc="${esc(c.id)}">★</button></div>`).join("") + `</div>`
         : `<p class="hint">Aún no tienes competiciones favoritas. Búscalas abajo.</p>`;
       body += `<div class="toggle-row">Mostrar también el resto de competiciones<button class="sw${S.showOthers ? " on" : ""}" data-others="1" aria-label="Mostrar el resto"></button></div>`;
       if (DATA) {
         const res = Object.entries(DATA.comps).filter(([id, c]) => !isFavComp(id) && (!q || norm(c.n).includes(q)))
           .sort((x, y) => x[1].o - y[1].o).slice(0, q ? 60 : 25);
         body += `<p class="hint">${q ? "Resultados" : "Competiciones con partidos esta semana"}</p>` +
-          (res.map(([id, c]) => `<div class="row"><img src="${LOGO(c.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${esc(c.n)}</span><button class="act" data-fc="${esc(id)}">☆</button></div>`).join("") || `<p class="hint">Nada.</p>`);
+          (res.map(([id, c]) => `<div class="row"><img src="${LOGO(c.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${sportOf(id) !== "futbol" ? SPORT[sportOf(id)].f + " " : ""}${esc(c.n)}</span><button class="act" data-fc="${esc(id)}">☆</button></div>`).join("") || `<p class="hint">Nada.</p>`);
       }
     }
     return body;
@@ -367,25 +402,29 @@ function setupSort() {
 
 /* ---------- datos ---------- */
 function renderFoot() {
-  if (!DATA) return;
+  if (!DATA || !DATA.generated) { $("#foot").textContent = ""; return; }
   const mins = Math.round((now() - DATA.generated) / 60);
   $("#foot").textContent = `Datos de futbolenlatv y webs hermanas · actualizado ${mins < 1 ? "ahora" : mins < 60 ? `hace ${mins} min` : `hace ${Math.round(mins / 60)} h`}`;
 }
-async function load() {
+async function loadSport(k) {
   try {
-    const r = await fetch("data.json?ts=" + Math.floor(Date.now() / 60000), { cache: "no-store" });
+    const r = await fetch(`data-${k}.json?ts=${Math.floor(Date.now() / 60000)}`, { cache: "no-store" });
     if (!r.ok) throw new Error(r.status);
-    DATA = await r.json();
-    try { localStorage.setItem("ptv.cache", JSON.stringify(DATA)); } catch {}
+    SD[k] = await r.json();
+    try { localStorage.setItem("ptv.cache." + k, JSON.stringify(SD[k])); } catch {}
   } catch {
-    if (!DATA) { try { DATA = JSON.parse(localStorage.getItem("ptv.cache")); } catch {} }
+    if (!SD[k]) { try { SD[k] = JSON.parse(localStorage.getItem("ptv.cache." + k)); } catch {} }
   }
-  renderList(); renderFoot();
+}
+async function load() {
+  await Promise.all(S.sports.map(loadSport));
+  mergeData(); renderList(); renderFoot();
 }
 
-renderDays(); renderLangs();
-try { DATA = JSON.parse(localStorage.getItem("ptv.cache")); } catch {}
-renderList(); renderFoot();
+renderDays(); renderSports(); renderLangs();
+try { localStorage.removeItem("ptv.cache"); } catch {}
+for (const k of S.sports) { try { SD[k] = JSON.parse(localStorage.getItem("ptv.cache." + k)); } catch {} }
+mergeData(); renderList(); renderFoot();
 load();
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {

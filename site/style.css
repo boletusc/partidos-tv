@@ -31,8 +31,10 @@ header#top {
   padding-top: var(--safe-top);
   border-bottom: 1px solid var(--line);
 }
-.bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px 2px; }
-.bar h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.5px; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px 2px 16px; }
+#sports { flex: 1; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+#sports::-webkit-scrollbar { display: none; }
+.flag.sport { height: 40px; min-width: 48px; font-size: 22px; border-radius: 12px; }
 .icon-btn { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; color: var(--star); }
 .icon-btn:active { background: var(--card2); }
 
@@ -94,6 +96,7 @@ main { overflow: hidden; min-height: 70vh; }
 .team img { width: 20px; height: 20px; object-fit: contain; flex: 0 0 20px; }
 .team span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .team.fav span { font-weight: 700; }
+.team.ev span { white-space: normal; font-weight: 600; }
 .team.fav span::after { content: " ★"; color: var(--star); font-size: 12px; }
 .rnd { font-size: 12px; color: var(--muted); }
 .chans { grid-column: 2; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }

@@ -27,8 +27,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Recuperar los datos publicados (se conservan si un deporte falla)
+        run: |
+          for s in futbol baloncesto tenis motos coches; do
+            curl -sf -o site/data-$s.json https://boletusc.github.io/partidos-tv/data-$s.json || rm -f site/data-$s.json
+          done
       - name: Descargar partidos
-        run: python scraper.py site/data.json
+        run: python scraper.py site
       - name: Mantener vivo el cron (GitHub lo pausa tras 60 días sin commits)
         run: |
           last=$(git log -1 --format=%ct)

@@ -1,2 +1,2 @@
-site/data.json
+site/data*.json
 __pycache__/

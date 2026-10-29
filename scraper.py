@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Descarga la red de webs de Wosti (futbolenlatv.es y gemelas) y genera site/data.json.
+"""Descarga la red de webs de Wosti (futbolenlatv.es y gemelas) y genera site/data-<deporte>.json.
 
-El mismo partido se identifica entre webs por el escudo de los dos equipos + hora UTC.
+El mismo partido se identifica entre webs por el escudo (o el nombre) de los dos rivales + hora UTC.
+Cada deporte va en su propio archivo: si uno falla, se conserva el anterior y el resto sigue.
 """
 import html
 import json
@@ -16,20 +17,28 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-# (clave web, idioma, dominio, zona horaria, formato fecha)
+# (clave web, idioma, dominio, zona horaria, formato fecha, prefijo de las páginas de otros deportes)
 SITES = [
-    ("es", "es", "www.futbolenlatv.es", "Europe/Madrid", "dmy"),
-    ("mx", "lat", "www.futbolenvivomexico.com", "America/Mexico_City", "dmy"),
-    ("ar", "lat", "www.futbolenvivoargentina.com", "America/Argentina/Buenos_Aires", "dmy"),
-    ("co", "lat", "www.futbolenvivocolombia.com", "America/Bogota", "dmy"),
-    ("us", "us", "www.futbolenvivousa.com", "America/New_York", "mdy"),
-    ("uk", "en", "www.ukfootballontv.co.uk", "Europe/London", "dmy"),
-    ("de", "de", "www.fussball-im-tv.com", "Europe/Berlin", "dmy"),
-    ("it", "it", "www.calcio-tv.com", "Europe/Rome", "dmy"),
-    ("fr", "fr", "www.foottv.fr", "Europe/Paris", "dmy"),
-    ("pt", "pt", "www.futebolnatv.pt", "Europe/Lisbon", "dmy"),
-    ("br", "br", "www.futebolaovivobrasil.com", "America/Sao_Paulo", "dmy"),
+    ("es", "es", "www.futbolenlatv.es", "Europe/Madrid", "dmy", "/deporte/"),
+    ("mx", "lat", "www.futbolenvivomexico.com", "America/Mexico_City", "dmy", "/deporte/"),
+    ("ar", "lat", "www.futbolenvivoargentina.com", "America/Argentina/Buenos_Aires", "dmy", "/deporte/"),
+    ("co", "lat", "www.futbolenvivocolombia.com", "America/Bogota", "dmy", "/deporte/"),
+    ("us", "us", "www.futbolenvivousa.com", "America/New_York", "mdy", "/deporte/"),
+    ("uk", "en", "www.ukfootballontv.co.uk", "Europe/London", "dmy", "/sport/"),
+    ("de", "de", "www.fussball-im-tv.com", "Europe/Berlin", "dmy", "/sport/"),
+    ("it", "it", "www.calcio-tv.com", "Europe/Rome", "dmy", "/sport/"),
+    ("fr", "fr", "www.foottv.fr", "Europe/Paris", "dmy", "/sport/"),
+    ("pt", "pt", "www.futebolnatv.pt", "Europe/Lisbon", "dmy", "/sport/"),
+    ("br", "br", "www.futebolaovivobrasil.com", "America/Sao_Paulo", "dmy", "/esporte/"),
 ]
+# deporte → slug de su página (la web alemana usa los suyos); fútbol es la portada
+SPORTS = {
+    "futbol": None,
+    "baloncesto": {"*": "baloncesto", "de": "basketball"},
+    "tenis": {"*": "tenis", "de": "tennis"},
+    "motos": {"*": "motociclismo", "de": "motorradrennen"},
+    "coches": {"*": "automovilismo", "de": "autorennen"},
+}
 DAYS = 7
 UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
@@ -69,20 +78,32 @@ def clean_channel(name):
     return name
 
 
-def fetch(domain):
+def site_url(site, sport):
+    slugs = SPORTS[sport]
+    if not slugs:
+        return f"https://{site[2]}/"
+    return f"https://{site[2]}{site[5]}{slugs.get(site[0], slugs['*'])}"
+
+
+def fetch(url):
     for attempt in range(3):
         try:
-            req = urllib.request.Request(f"https://{domain}/", headers={"User-Agent": UA, "Accept-Language": "es-ES,es;q=0.9"})
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "es-ES,es;q=0.9"})
             with urllib.request.urlopen(req, timeout=40) as r:
                 return r.read().decode("utf-8", "replace")
         except Exception as e:  # noqa: BLE001
-            print(f"[{domain}] intento {attempt + 1}: {e}", file=sys.stderr)
+            print(f"[{url}] intento {attempt + 1}: {e}", file=sys.stderr)
             time.sleep(3)
     return None
 
 
+def norm_name(t):
+    t = unicodedata.normalize("NFKD", html.unescape(t).lower()).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
 def parse(site, page):
-    key, lang, domain, tzname, datefmt = site
+    key, lang, domain, tzname, datefmt, _ = site
     tz = ZoneInfo(tzname)
     start = page.find('<table class="tablaPrincipal')
     end = page.rfind("</table>")
@@ -111,21 +132,44 @@ def parse(site, page):
             }
             continue
         hm = RE_HORA.search(chunk)
-        if not hm or not day or not comp or 'class="local"' not in chunk:
+        if not hm or not day:
             continue
-        local_part = chunk[chunk.find('class="local"'):chunk.find('class="visitante"')]
-        away_part = chunk[chunk.find('class="visitante"'):chunk.find('class="canales"')]
-        teams = []
-        for part in (local_part, away_part):
-            img = RE_IMG.search(part)
-            nm = RE_SPAN_TITLE.search(part)
-            href = RE_HREF.search(part)
-            teams.append({
-                "logo": img.group(1) if img else None,
-                "name": html.unescape(nm.group(1)).strip() if nm else "?",
-                "slug": href.group(1).rstrip("/").split("/")[-1] if href else None,
-            })
-        det = chunk[chunk.find('class="detalles'):chunk.find('class="local"')]
+        is_event = 'class="eventoUnaColumna' in chunk
+        if not is_event and 'class="local"' not in chunk:
+            continue
+        det_end = chunk.find('class="eventoUnaColumna' if is_event else 'class="local"')
+        det = chunk[chunk.find('class="detalles'):det_end]
+        # En las páginas de otros deportes la competición va en cada fila, no en una cabecera
+        cimg = re.search(r'<img src="[^"]*img/\d+/([^"./]+)\.webp"[^>]*title="([^"]*)"', det)
+        row_comp = comp
+        if cimg:
+            href = RE_HREF.search(det)
+            cname = html.unescape(cimg.group(2)).strip()
+            row_comp = {
+                "slug": href.group(1).rstrip("/").split("/")[-1] if href else cname,
+                "name": cname,
+                "logo": cimg.group(1),
+            }
+        if not row_comp:
+            continue
+        if is_event:
+            ev = re.search(r'class="eventoUnico">(.*?)</span>', chunk, re.S)
+            text = re.sub(r"\s*<br\s*/?>\s*", " · ", ev.group(1)) if ev else ""
+            text = html.unescape(re.sub(r"<[^>]+>", "", text)).strip(" ·")
+            teams = [{"logo": None, "name": text, "slug": None}, None]
+        else:
+            local_part = chunk[chunk.find('class="local"'):chunk.find('class="visitante"')]
+            away_part = chunk[chunk.find('class="visitante"'):chunk.find('class="canales"')]
+            teams = []
+            for part in (local_part, away_part):
+                img = RE_IMG.search(part)
+                nm = RE_SPAN_TITLE.search(part)
+                href = RE_HREF.search(part)
+                teams.append({
+                    "logo": img.group(1) if img else None,
+                    "name": html.unescape(nm.group(1)).strip() if nm else "?",
+                    "slug": href.group(1).rstrip("/").split("/")[-1] if href else None,
+                })
         rnd = RE_SPAN_TITLE.search(det)
         canales = chunk[chunk.find('class="listaCanales"'):]
         chans = []
@@ -138,7 +182,8 @@ def parse(site, page):
             "site": key,
             "lang": lang,
             "t": int(dt.timestamp()),
-            "comp": comp,
+            "comp": row_comp,
+            "event": is_event,
             "round": html.unescape(rnd.group(1)).strip() if rnd else "",
             "home": teams[0],
             "away": teams[1],
@@ -147,21 +192,28 @@ def parse(site, page):
     return out
 
 
-def team_key(t, generic):
+def team_key(t, generic, sport):
     if t["logo"] and t["logo"] not in generic:
         return t["logo"]
-    return "n:" + (t["slug"] or t["name"]).lower()
+    if sport == "futbol" and t["slug"]:
+        return "n:" + t["slug"].lower()
+    return f"n:{sport}:{norm_name(t['name'])}"
 
 
-def build(rows_by_site):
-    # Escudos genéricos (el mismo para muchos equipos distintos) no sirven como identificador
+def build(rows_by_site, sport):
+    # Un escudo que en una misma web lleva dos nombres distintos es genérico (p. ej. la bandera
+    # de un tenista) y no sirve como identificador: entonces se usa el nombre
     logo_names = defaultdict(set)
-    for rows in rows_by_site.values():
+    for site_key, rows in rows_by_site.items():
         for r in rows:
             for t in (r["home"], r["away"]):
-                if t["logo"] and t["slug"]:
-                    logo_names[t["logo"]].add(t["slug"])
-    generic = {logo for logo, s in logo_names.items() if len(s) > 3}
+                if t and t["logo"] and (t["slug"] or sport != "futbol"):
+                    logo_names[t["logo"]].add((site_key, t["slug"] or norm_name(t["name"])))
+    if sport == "futbol":  # escudos propios por club: solo los compartidos por muchos son genéricos
+        generic = {logo for logo, names in logo_names.items() if len({n for _, n in names}) > 3}
+    else:
+        generic = {logo for logo, names in logo_names.items()
+                   if max(Counter(sk for sk, _ in names).values()) > 1}
 
     now = int(time.time())
     first_day = datetime.now(ZoneInfo("Europe/Madrid")).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -178,18 +230,24 @@ def build(rows_by_site):
         for r in rows_by_site.get(site_key, []):
             if not (t_min <= r["t"] <= t_max):
                 continue
-            h, a = team_key(r["home"], generic), team_key(r["away"], generic)
+            if r["event"]:  # GP, carrera…: se identifica por la competición (MotoGP, F1…) y la hora
+                h, a = "ev:" + (r["comp"]["logo"] or norm_name(r["comp"]["name"])), ""
+                tolerance = (-3600, 3600)
+            else:
+                h, a = team_key(r["home"], generic, sport), team_key(r["away"], generic, sport)
+                tolerance = (-3600, 3600, -1800, 1800, -900, 900)
             mid = f"{h}|{a}|{r['t']}"
             if mid not in matches:
                 # tolerancia: algunas webs aplican mal el cambio de hora a días futuros (±1 h)
-                for dt in (-3600, 3600, -1800, 1800, -900, 900):
+                for dt in tolerance:
                     alt = f"{h}|{a}|{r['t'] + dt}"
                     if alt in matches:
                         mid = alt
                         break
-            for tk, t in ((h, r["home"]), (a, r["away"])):
-                if tk not in teams:
-                    teams[tk] = {"n": t["name"], "l": t["logo"] if tk == t["logo"] else None}
+            if not r["event"]:
+                for tk, t in ((h, r["home"]), (a, r["away"])):
+                    if tk not in teams:
+                        teams[tk] = {"n": t["name"], "l": t["logo"] if tk == t["logo"] or sport != "futbol" else None}
             cs = (site_key, r["comp"]["slug"])
             if mid in matches:
                 m = matches[mid]
@@ -203,6 +261,8 @@ def build(rows_by_site):
                 if cid not in comps:
                     comps[cid] = {"n": r["comp"]["name"], "l": r["comp"]["logo"], "o": len(comps)}
                 m = matches[mid] = {"id": mid, "t": r["t"], "c": cid, "r": r["round"], "h": h, "a": a, "ch": {}}
+                if r["event"]:
+                    m.update(h=None, a=None, e=r["home"]["name"])
             lst = m["ch"].setdefault(r["lang"], [])
             for c in r["chans"]:
                 if c not in lst:
@@ -250,7 +310,7 @@ def build(rows_by_site):
     final = {}
     for m in matches.values():
         old = m["c"]
-        m["c"] = slugify(comps[old]["n"])
+        m["c"] = slugify(comps[old]["n"]) if sport == "futbol" else f"{sport}:{slugify(comps[old]['n'])}"
         final.setdefault(m["c"], comps[old])
     comps = final
 
@@ -262,9 +322,10 @@ def build(rows_by_site):
         comps[cid]["o"] = rank
 
     used_comps = {m["c"] for m in matches.values()}
-    used_teams = {k for m in matches.values() for k in (m["h"], m["a"])}
+    used_teams = {k for m in matches.values() for k in (m["h"], m["a"]) if k}
     return {
         "generated": now,
+        "sport": sport,
         "comps": {k: v for k, v in comps.items() if k in used_comps},
         "teams": {k: v for k, v in teams.items() if k in used_teams},
         "matches": sorted(matches.values(), key=lambda m: (m["t"], comps[m["c"]]["o"])),
@@ -272,20 +333,28 @@ def build(rows_by_site):
 
 
 def main():
-    out_path = Path(sys.argv[1] if len(sys.argv) > 1 else "site/data.json")
+    out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "site")
+    jobs = [(sport, site) for sport in SPORTS for site in SITES]
     with ThreadPoolExecutor(6) as ex:
-        pages = dict(zip([s[0] for s in SITES], ex.map(lambda s: fetch(s[2]), SITES)))
-    rows = {}
-    for s in SITES:
-        page = pages[s[0]]
-        rows[s[0]] = parse(s, page) if page else []
-        print(f"{s[0]}: {len(rows[s[0]])} partidos", file=sys.stderr)
-    if not rows["es"]:
-        sys.exit("futbolenlatv.es no devolvió datos; no se sobrescribe data.json")
-    data = build(rows)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"{len(data['matches'])} partidos, {len(data['comps'])} competiciones → {out_path}", file=sys.stderr)
+        pages = dict(zip([(sp, si[0]) for sp, si in jobs], ex.map(lambda j: fetch(site_url(j[1], j[0])), jobs)))
+    ok = 0
+    for sport in SPORTS:
+        rows = {}
+        for site in SITES:
+            page = pages[(sport, site[0])]
+            rows[site[0]] = parse(site, page) if page else []
+        print(f"{sport}: " + " ".join(f"{k}={len(v)}" for k, v in rows.items()), file=sys.stderr)
+        out = out_dir / f"data-{sport}.json"
+        if not rows["es"]:
+            print(f"  futbolenlatv.es no devolvió {sport}; se conserva el archivo anterior", file=sys.stderr)
+            continue
+        data = build(rows, sport)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        ok += 1
+        print(f"  {len(data['matches'])} partidos, {len(data['comps'])} competiciones → {out}", file=sys.stderr)
+    if not ok:
+        sys.exit("ningún deporte se pudo actualizar")
 
 
 if __name__ == "__main__":
