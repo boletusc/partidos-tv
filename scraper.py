@@ -69,6 +69,43 @@ RE_REGIONAL = re.compile(
 )
 
 
+# Orden por defecto (sin favoritos), al estilo FotMob/BeSoccer para un usuario español.
+# Expresiones sobre el nombre normalizado de la competición; lo no listado va detrás, por relevancia.
+PRIORITY = {
+    "futbol": [
+        # España
+        r"^la ?liga ea", r"^copa del rey$", r"^supercopa de espana$", r"^la ?liga hypermotion", r"^primera federacion$",
+        r"^copa de la reina", r"^liga f$", r"^segunda federacion$", r"^tercera federacion$",
+        # Selecciones y Europa
+        r"^mundial$|^copa del mundo$|^fifa mundial$", r"^eurocopa$", r"clasificacion (mundial|eurocopa)", r"^uefa nations league$",
+        r"amistos", r"^champions league$", r"^europa league$", r"^conference league$", r"supercopa de europa|uefa super cup",
+        r"mundial de clubes",
+        # Inglaterra
+        r"^premier league$", r"^fa cup$|^copa fa$|^copa de inglaterra$", r"^efl carabao cup$|^copa de la liga inglesa",
+        r"community shield", r"^championship$", r"^league one$", r"^league two$", r"^efl trophy$", r"^national league$",
+        # Italia, Alemania, Francia, Portugal
+        r"^serie a italiana$", r"^coppa italia$|^copa de italia$", r"supercoppa|supercopa de italia", r"^serie b italiana$",
+        r"^bundesliga$", r"^dfb pokal$|^copa de alemania$", r"^2 bundesliga$", r"^3 liga$",
+        r"^francia ligue 1$|^ligue 1$", r"^copa de francia$|^coupe de france$", r"^ligue 2$",
+        r"^liga portuguesa$", r"^copa de portugal$|^taca de portugal$", r"^allianz cup$", r"^liga portugal 2$",
+        # Resto de Europa
+        r"^eredivisie$", r"^jupiler pro league$", r"^superliga turca$", r"^premiership$", r"^scottish", r"^superliga grecia$",
+        r"^saudi pro league$",
+        # América
+        r"^copa libertadores$", r"^copa sudamericana$", r"^liga mx$", r"^primera division argentina$|^liga profesional argentina",
+        r"^copa argentina$", r"^serie a brasil$|^brasileirao$", r"^copa do brasil$", r"^mls$", r"^liga colombiana$",
+        r"concacaf champions",
+        # Femenino de primer nivel
+        r"^champions league femenina$", r"^fa women s super league$",
+    ],
+    "baloncesto": [r"^nba$", r"^euroliga$", r"^liga endesa$", r"^copa del rey$", r"^supercopa", r"^eurocup$",
+                   r"^basketball champions league$", r"^fiba europe cup$", r"^primera feb$", r"^wnba$"],
+    "tenis": [r"grand slam|open de australia|roland garros|wimbledon|us open|atp finals|copa davis", r"masters", r"^atp"],
+    "motos": [r"^motogp$", r"^moto2$", r"^moto3$", r"superbike"],
+    "coches": [r"^formula 1$", r"^formula 2$", r"^formula 3$"],
+}
+
+
 def clean_channel(name):
     name = html.unescape(name).strip()
     for rx in RE_STRIP:
@@ -324,7 +361,12 @@ def build(rows_by_site, sport, shared_logos=frozenset()):
     pop = defaultdict(list)
     for m in matches.values():
         pop[m["c"]].append(len([lang for lang in m["ch"] if lang != "int"]))
-    for rank, cid in enumerate(sorted(pop, key=lambda c: -sum(pop[c]) / len(pop[c]) - 0.02 * len(pop[c]))):
+    prio = [re.compile(rx) for rx in PRIORITY.get(sport, [])]
+    def prio_of(cid):
+        n = norm_name(comps[cid]["n"])
+        return next((i for i, rx in enumerate(prio) if rx.search(n)), len(prio))
+    by_pop = sorted(pop, key=lambda c: -sum(pop[c]) / len(pop[c]) - 0.02 * len(pop[c]))
+    for rank, cid in enumerate(sorted(by_pop, key=prio_of)):  # sort estable: dentro de cada nivel, relevancia
         comps[cid]["o"] = rank
 
     # Catálogo para el buscador de favoritos: todos los equipos/competiciones de las páginas,
