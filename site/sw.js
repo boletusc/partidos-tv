@@ -1,4 +1,4 @@
-const CACHE = "ptv-v4";
+const CACHE = "ptv-v5";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon-180.png", "icons/icon-192.png"];
 
 self.addEventListener("install", e => {
