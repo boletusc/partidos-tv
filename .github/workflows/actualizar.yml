@@ -31,6 +31,7 @@ jobs:
         run: |
           for s in futbol baloncesto tenis motos coches; do
             curl -sf -o site/data-$s.json https://boletusc.github.io/partidos-tv/data-$s.json || rm -f site/data-$s.json
+            curl -sf -o site/cat-$s.json https://boletusc.github.io/partidos-tv/cat-$s.json || rm -f site/cat-$s.json
           done
       - name: Descargar partidos
         run: python scraper.py site

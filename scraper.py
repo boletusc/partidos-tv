@@ -132,8 +132,8 @@ def parse(site, page):
             }
             continue
         hm = RE_HORA.search(chunk)
-        if not hm or not day:
-            continue
+        if not day or not (hm or 'class="hora' in chunk):
+            continue  # sin hora ("PD", por determinar) sirve para el catálogo de equipos
         is_event = 'class="eventoUnaColumna' in chunk
         if not is_event and 'class="local"' not in chunk:
             continue
@@ -177,11 +177,11 @@ def parse(site, page):
             c = clean_channel(c)
             if c and c not in chans:
                 chans.append(c)
-        dt = datetime(*day, int(hm.group(1)), int(hm.group(2)), tzinfo=tz)
+        dt = datetime(*day, int(hm.group(1)), int(hm.group(2)), tzinfo=tz) if hm else None
         out.append({
             "site": key,
             "lang": lang,
-            "t": int(dt.timestamp()),
+            "t": int(dt.timestamp()) if dt else None,
             "comp": row_comp,
             "event": is_event,
             "round": html.unescape(rnd.group(1)).strip() if rnd else "",
@@ -195,12 +195,12 @@ def parse(site, page):
 def team_key(t, generic, sport):
     if t["logo"] and t["logo"] not in generic:
         return t["logo"]
-    if sport == "futbol" and t["slug"]:
-        return "n:" + t["slug"].lower()
+    if t["logo"] and sport == "futbol":  # escudo compartido (Real Madrid / RM Castilla): escudo + nombre
+        return f"{t['logo']}~{norm_name(t['name'])}"
     return f"n:{sport}:{norm_name(t['name'])}"
 
 
-def build(rows_by_site, sport):
+def build(rows_by_site, sport, shared_logos=frozenset()):
     # Un escudo que en una misma web lleva dos nombres distintos es genérico (p. ej. la bandera
     # de un tenista) y no sirve como identificador: entonces se usa el nombre
     logo_names = defaultdict(set)
@@ -209,8 +209,10 @@ def build(rows_by_site, sport):
             for t in (r["home"], r["away"]):
                 if t and t["logo"] and (t["slug"] or sport != "futbol"):
                     logo_names[t["logo"]].add((site_key, t["slug"] or norm_name(t["name"])))
-    if sport == "futbol":  # escudos propios por club: solo los compartidos por muchos son genéricos
-        generic = {logo for logo, names in logo_names.items() if len({n for _, n in names}) > 3}
+    if sport == "futbol":
+        # estable entre ejecuciones (los favoritos dependen de ello): escudos que el índice de clubes
+        # asigna a varios equipos (Real Madrid / RM Castilla) + los muy repetidos (escudo genérico)
+        generic = set(shared_logos) | {logo for logo, names in logo_names.items() if len({n for _, n in names}) > 3}
     else:
         generic = {logo for logo, names in logo_names.items()
                    if max(Counter(sk for sk, _ in names).values()) > 1}
@@ -221,6 +223,7 @@ def build(rows_by_site, sport):
     t_max = int((first_day + timedelta(days=DAYS)).timestamp()) + 12 * 3600
 
     teams, comps, matches = {}, {}, {}
+    loose = {}  # escudo-escudo-hora → id del partido
     comp_map = {}  # (site, slug) -> comp id base (de futbolenlatv.es)
     order = [s[0] for s in SITES]  # es primero: sus nombres mandan
 
@@ -228,7 +231,7 @@ def build(rows_by_site, sport):
     pending_comp_votes = defaultdict(Counter)
     for site_key in order:
         for r in rows_by_site.get(site_key, []):
-            if not (t_min <= r["t"] <= t_max):
+            if not r["t"] or not (t_min <= r["t"] <= t_max):
                 continue
             if r["event"]:  # GP, carrera…: se identifica por la competición (MotoGP, F1…) y la hora
                 h, a = "ev:" + (r["comp"]["logo"] or norm_name(r["comp"]["name"])), ""
@@ -238,16 +241,19 @@ def build(rows_by_site, sport):
                 tolerance = (-3600, 3600, -1800, 1800, -900, 900)
             mid = f"{h}|{a}|{r['t']}"
             if mid not in matches:
-                # tolerancia: algunas webs aplican mal el cambio de hora a días futuros (±1 h)
-                for dt in tolerance:
-                    alt = f"{h}|{a}|{r['t'] + dt}"
-                    if alt in matches:
+                # tolerancia: algunas webs aplican mal el cambio de hora a días futuros (±1 h);
+                # y con escudo compartido el nombre va traducido, así que se compara solo el escudo
+                lh, la = h.split("~")[0], a.split("~")[0]
+                for dt in (0, *tolerance):
+                    alt = loose.get(f"{lh}|{la}|{r['t'] + dt}")
+                    if alt:
                         mid = alt
                         break
+            loose.setdefault(f"{h.split('~')[0]}|{a.split('~')[0]}|{r['t']}", mid)
             if not r["event"]:
                 for tk, t in ((h, r["home"]), (a, r["away"])):
                     if tk not in teams:
-                        teams[tk] = {"n": t["name"], "l": t["logo"] if tk == t["logo"] or sport != "futbol" else None}
+                        teams[tk] = {"n": t["name"], "l": t["logo"]}
             cs = (site_key, r["comp"]["slug"])
             if mid in matches:
                 m = matches[mid]
@@ -321,9 +327,27 @@ def build(rows_by_site, sport):
     for rank, cid in enumerate(sorted(pop, key=lambda c: -sum(pop[c]) / len(pop[c]) - 0.02 * len(pop[c]))):
         comps[cid]["o"] = rank
 
+    # Catálogo para el buscador de favoritos: todos los equipos/competiciones de las páginas,
+    # aunque no jueguen esta semana (se acumula entre ejecuciones en main)
+    cat_teams, cat_comps = {}, {}
+    for site_key in order:
+        for r in rows_by_site.get(site_key, []):
+            if r["event"]:
+                continue
+            for t in (r["home"], r["away"]):
+                tk = team_key(t, generic, sport)
+                cat_teams.setdefault(tk, {"n": t["name"], "l": t["logo"]})
+            if site_key == "es":
+                cid = slugify(r["comp"]["name"])
+                cat_comps.setdefault(cid if sport == "futbol" else f"{sport}:{cid}", {"n": r["comp"]["name"], "l": r["comp"]["logo"]})
+    for cid, c in comps.items():
+        cat_comps[cid] = {"n": c["n"], "l": c["l"]}
+    for tk, t in teams.items():
+        cat_teams[tk] = {"n": t["n"], "l": t["l"]}
+
     used_comps = {m["c"] for m in matches.values()}
     used_teams = {k for m in matches.values() for k in (m["h"], m["a"]) if k}
-    return {
+    return {"teams": cat_teams, "comps": cat_comps, "generic": generic}, {
         "generated": now,
         "sport": sport,
         "comps": {k: v for k, v in comps.items() if k in used_comps},
@@ -337,6 +361,17 @@ def main():
     jobs = [(sport, site) for sport in SPORTS for site in SITES]
     with ThreadPoolExecutor(6) as ex:
         pages = dict(zip([(sp, si[0]) for sp, si in jobs], ex.map(lambda j: fetch(site_url(j[1], j[0])), jobs)))
+    # Índice de clubes de futbolenlatv.es (≈1.200 equipos con escudo) para buscar favoritos
+    idx = fetch("https://www.futbolenlatv.es/equipo") or ""
+    club_index = [(m.group(1), html.unescape(m.group(2)).strip()) for m in re.finditer(
+        r'<img src="[^"]*img/\d+/([^"./]+)\.(?:webp|png)"[^>]*title="([^"]*)"[^>]*>\s*(?:</a>\s*)?<a href="/equipo/', idx)]
+    club_index += [(m.group(1), html.unescape(m.group(2)).strip()) for m in re.finditer(
+        r'href="/equipo/[^"]+">\s*<img src="[^"]*img/\d+/([^"./]+)\.(?:webp|png)"[^>]*title="([^"]*)"', idx)]
+    names_by_logo = defaultdict(set)
+    for logo, name in club_index:
+        names_by_logo[logo].add(name)
+    shared_logos = frozenset(lg for lg, ns in names_by_logo.items() if len(ns) > 1)
+    print(f"índice de clubes: {len(club_index)} ({len(shared_logos)} escudos compartidos)", file=sys.stderr)
     ok = 0
     for sport in SPORTS:
         rows = {}
@@ -348,9 +383,22 @@ def main():
         if not rows["es"]:
             print(f"  futbolenlatv.es no devolvió {sport}; se conserva el archivo anterior", file=sys.stderr)
             continue
-        data = build(rows, sport)
+        cat, data = build(rows, sport, shared_logos if sport == "futbol" else frozenset())
+        generic_futbol = cat.pop("generic")
+        if sport == "futbol" and club_index:
+            for logo, name in club_index:
+                tk = team_key({"logo": logo, "name": name, "slug": None}, generic_futbol, "futbol")
+                cat["teams"].setdefault(tk, {"n": name, "l": logo})
+        cat_path = out_dir / f"cat-{sport}.json"
+        try:
+            old = json.loads(cat_path.read_text(encoding="utf-8"))
+            for k in ("teams", "comps"):
+                cat[k] = {**old.get(k, {}), **cat[k]}
+        except (OSError, ValueError):
+            pass
         out_dir.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        cat_path.write_text(json.dumps(cat, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         ok += 1
         print(f"  {len(data['matches'])} partidos, {len(data['comps'])} competiciones → {out}", file=sys.stderr)
     if not ok:

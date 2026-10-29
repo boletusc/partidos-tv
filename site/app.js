@@ -47,6 +47,17 @@ const save = () => {
 
 const SD = {};      // datos por deporte, tal cual llegan
 let DATA = null;   // unión de los deportes seleccionados
+// Python norm_name: los favoritos con escudo compartido usan "escudo~nombre" como id
+const pyNorm = s => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function migrateFavs() {
+  let changed = false;
+  for (const f of S.favTeams) {
+    if (f.id.includes("~") || f.id.startsWith("n:")) continue;
+    const alt = f.id + "~" + pyNorm(f.n);
+    if (findIn("teams", alt)) { f.id = alt; changed = true; }
+  }
+  if (changed) save();
+}
 function mergeData() {
   const parts = S.sports.map(k => SD[k]).filter(Boolean);
   if (!parts.length) { DATA = S.sports.length ? null : { comps: {}, teams: {}, matches: [], generated: 0 }; return; }
@@ -56,6 +67,7 @@ function mergeData() {
     teams: Object.assign({}, ...parts.map(p => p.teams)),
     matches: parts.flatMap(p => p.matches.map(m => (m.s = p.sport, m))).sort((x, y) => x.t - y.t),
   };
+  migrateFavs();
 }
 let dayIdx = 0;
 const $ = s => document.querySelector(s);
@@ -273,14 +285,33 @@ let sy = null;
 $("#sheet").addEventListener("touchstart", e => { sy = $("#sheet").scrollTop <= 0 && !e.target.closest(".handle") ? e.touches[0].clientY : null; }, { passive: true });
 $("#sheet").addEventListener("touchend", e => { if (sy !== null && e.changedTouches[0].clientY - sy > 90) closeSheet(); sy = null; }, { passive: true });
 
+/* Catálogo de todos los equipos/jugadores y competiciones (aunque no jueguen esta semana) */
+const CAT = {};
+async function loadCats() {
+  await Promise.all(SPORTS.map(async x => {
+    if (CAT[x.k]) return;
+    try { const r = await fetch(`cat-${x.k}.json?ts=${Math.floor(Date.now() / 3600000)}`); if (r.ok) CAT[x.k] = await r.json(); } catch {}
+  }));
+}
+const findIn = (kind, id) => DATA?.[kind]?.[id] || Object.values(CAT).map(c => c[kind]?.[id]).find(Boolean);
+function searchCat(kind, q, isFav, extra) {
+  const seen = new Set(), out = [];
+  const add = (id, x, sp) => { if (!seen.has(id) && !isFav(id) && norm(x.n).includes(q)) { seen.add(id); out.push([id, x, sp]); } };
+  for (const x of SPORTS) for (const [id, v] of Object.entries(CAT[x.k]?.[kind] || {})) add(id, v, x.k);
+  for (const [id, v] of Object.entries(extra || {})) add(id, v, kind === "comps" ? sportOf(id) : "futbol");
+  const starts = ([, x]) => norm(x.n).startsWith(q) || norm(x.n).includes(" " + q) ? 0 : 1;
+  return out.sort((a, b) => starts(a) - starts(b) || a[1].n.length - b[1].n.length);
+}
+const sportTag = sp => sp && sp !== "futbol" ? SPORT[sp].f + " " : "";
+
 function toggleTeam(id) {
   if (isFavTeam(id)) S.favTeams = S.favTeams.filter(t => t.id !== id);
-  else { const t = DATA.teams[id]; S.favTeams.push({ id, n: t?.n || id, l: t?.l || null }); }
+  else { const t = findIn("teams", id); S.favTeams.push({ id, n: t?.n || id, l: t?.l || null }); }
   save();
 }
 function toggleComp(id) {
   if (isFavComp(id)) S.favComps = S.favComps.filter(c => c.id !== id);
-  else { const c = DATA.comps[id]; S.favComps.push({ id, n: c?.n || id, l: c?.l || null }); }
+  else { const c = findIn("comps", id); S.favComps.push({ id, n: c?.n || id, l: c?.l || null }); }
   save();
 }
 
@@ -324,10 +355,10 @@ function favBody() {
       body += S.favTeams.length
         ? S.favTeams.map(t => `<div class="row"><img src="${LOGO(DATA?.teams[t.id]?.l || t.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${esc(t.n)}</span><button class="act star" data-ft="${esc(t.id)}">★</button></div>`).join("")
         : `<p class="hint">Aún no sigues a ningún equipo. Búscalo abajo o tócalo en cualquier partido.</p>`;
-      if (q.length >= 2 && DATA) {
-        const res = Object.entries(DATA.teams).filter(([id, t]) => !isFavTeam(id) && norm(t.n).includes(q)).slice(0, 40);
-        body += `<p class="hint">Resultados (equipos y jugadores con partido esta semana en los deportes elegidos)</p>` +
-          (res.map(([id, t]) => `<div class="row"><img src="${LOGO(t.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${esc(t.n)}</span><button class="act" data-ft="${esc(id)}">☆</button></div>`).join("") || `<p class="hint">Nada.</p>`);
+      if (q.length >= 2) {
+        const res = searchCat("teams", q, isFavTeam, DATA?.teams).slice(0, 40);
+        body += `<p class="hint">Resultados${Object.keys(CAT).length < SPORTS.length ? " (cargando catálogo…)" : ""}</p>` +
+          (res.map(([id, t, sp]) => `<div class="row"><img src="${LOGO(t.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${sportTag(sp)}${esc(t.n)}</span><button class="act" data-ft="${esc(id)}">☆</button></div>`).join("") || `<p class="hint">Nada.</p>`);
       }
     } else {
       body += S.favComps.length
@@ -335,9 +366,9 @@ function favBody() {
           S.favComps.map((c, i) => `<div class="row" data-i="${i}"><span class="handle">☰</span><img src="${LOGO(DATA?.comps[c.id]?.l || c.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${sportOf(c.id) !== "futbol" ? SPORT[sportOf(c.id)].f + " " : ""}${esc(DATA?.comps[c.id]?.n || c.n)}</span><button class="act star" data-fc="${esc(c.id)}">★</button></div>`).join("") + `</div>`
         : `<p class="hint">Aún no tienes competiciones favoritas. Búscalas abajo.</p>`;
       body += `<div class="toggle-row">Mostrar también el resto de competiciones<button class="sw${S.showOthers ? " on" : ""}" data-others="1" aria-label="Mostrar el resto"></button></div>`;
-      if (DATA) {
-        const res = Object.entries(DATA.comps).filter(([id, c]) => !isFavComp(id) && (!q || norm(c.n).includes(q)))
-          .sort((x, y) => x[1].o - y[1].o).slice(0, q ? 60 : 25);
+      if (q || DATA) {
+        const res = q ? searchCat("comps", q, isFavComp, DATA?.comps).slice(0, 60)
+          : Object.entries(DATA.comps).filter(([id]) => !isFavComp(id)).sort((x, y) => x[1].o - y[1].o).slice(0, 25);
         body += `<p class="hint">${q ? "Resultados" : "Competiciones con partidos esta semana"}</p>` +
           (res.map(([id, c]) => `<div class="row"><img src="${LOGO(c.l)}" alt="" onerror="this.style.visibility='hidden'"><span class="n">${sportOf(id) !== "futbol" ? SPORT[sportOf(id)].f + " " : ""}${esc(c.n)}</span><button class="act" data-fc="${esc(id)}">☆</button></div>`).join("") || `<p class="hint">Nada.</p>`);
       }
@@ -356,7 +387,10 @@ function openFavs() {
   };
   sheetRender();
 }
-$("#btn-fav").addEventListener("click", () => { favQuery = ""; openFavs(); });
+$("#btn-fav").addEventListener("click", () => {
+  favQuery = ""; openFavs();
+  loadCats().then(() => { migrateFavs(); if ($("#fav-body")) { $("#fav-body").innerHTML = favBody(); setupSort(); } });
+});
 
 $("#sheet").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;

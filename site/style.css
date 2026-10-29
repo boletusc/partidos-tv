@@ -1,12 +1,13 @@
 :root {
-  --bg: #0d1117;
-  --card: #161b22;
-  --card2: #1f2630;
-  --line: #262d37;
-  --text: #e9edf2;
-  --muted: #8b949e;
-  --accent: #2fd27a;
-  --live: #ff4d4f;
+  --bg: #0b0c1a;
+  --card: #15172b;
+  --card2: #20233d;
+  --line: #2a2d4a;
+  --text: #eef0fb;
+  --muted: #9095b8;
+  --accent: #a78bfa;
+  --grad: linear-gradient(135deg, #7c3aed, #db2777);
+  --live: #ff3b6b;
   --star: #f5c518;
   --safe-top: env(safe-area-inset-top);
   --safe-bot: env(safe-area-inset-bottom);
@@ -26,7 +27,7 @@ input { font: inherit; }
 /* Cabecera */
 header#top {
   position: sticky; top: 0; z-index: 10;
-  background: rgba(13, 17, 23, .92);
+  background: rgba(11, 12, 26, .9);
   -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   padding-top: var(--safe-top);
   border-bottom: 1px solid var(--line);
@@ -46,7 +47,7 @@ header#top {
   flex: 0 0 auto; padding: 6px 12px; border-radius: 16px; color: var(--muted);
   font-weight: 600; font-size: 14px; text-transform: capitalize;
 }
-.day.on { background: var(--text); color: var(--bg); }
+.day.on { background: var(--grad); color: #fff; box-shadow: 0 4px 14px rgba(219, 39, 119, .35); }
 #langs { padding-bottom: 10px; }
 .flag {
   flex: 0 0 auto; height: 34px; min-width: 42px; padding: 0 8px; border-radius: 10px;
@@ -55,7 +56,7 @@ header#top {
   opacity: .35; transition: opacity .15s;
 }
 .flag small { font-size: 11px; font-weight: 700; color: var(--text); }
-.flag.on { opacity: 1; filter: none; border-color: var(--accent); background: var(--card2); }
+.flag.on { opacity: 1; border-color: var(--accent); background: rgba(124, 58, 237, .22); }
 .flag.tv { font-size: 12px; font-weight: 700; color: var(--text); }
 
 /* Lista */
@@ -69,7 +70,7 @@ main { overflow: hidden; min-height: 70vh; }
   margin: 18px 6px 8px; font-size: 13px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .6px; color: var(--muted);
 }
-.comp { background: var(--card); border-radius: 14px; margin-bottom: 10px; overflow: hidden; }
+.comp { background: var(--card); border-radius: 16px; margin-bottom: 10px; overflow: hidden; border: 1px solid rgba(167, 139, 250, .08); }
 .comp-h {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   padding: 11px 14px; font-weight: 700; font-size: 14px;
@@ -142,7 +143,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 0 
 /* Favoritos */
 .tabs { display: flex; background: var(--bg); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
 .tabs button { flex: 1; padding: 8px; border-radius: 8px; font-weight: 600; color: var(--muted); }
-.tabs button.on { background: var(--card2); color: var(--text); }
+.tabs button.on { background: var(--grad); color: #fff; }
 .search {
   width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); margin-bottom: 10px; -webkit-user-select: text; user-select: text;
@@ -161,5 +162,5 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 0 
 .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 6px; font-weight: 600; }
 .sw { width: 50px; height: 30px; border-radius: 15px; background: var(--line); position: relative; transition: background .2s; flex: 0 0 auto; }
 .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: transform .2s; }
-.sw.on { background: var(--accent); }
+.sw.on { background: var(--grad); }
 .sw.on::after { transform: translateX(20px); }
