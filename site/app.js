@@ -117,9 +117,13 @@ function compHTML(key, title, logo, ms) {
   </div>`;
 }
 function renderList() {
-  const el = $("#list");
-  if (!DATA) { el.innerHTML = `<div class="empty"><b>Cargando…</b></div>`; return; }
-  const from = startOfDay(dayIdx), to = startOfDay(dayIdx + 1);
+  $("#pane-cur").innerHTML = dayHTML(dayIdx);
+  $("#pane-prev").innerHTML = dayIdx > 0 ? dayHTML(dayIdx - 1) : "";
+  $("#pane-next").innerHTML = dayIdx < 6 ? dayHTML(dayIdx + 1) : "";
+}
+function dayHTML(di) {
+  if (!DATA) return `<div class="empty"><b>Cargando…</b></div>`;
+  const from = startOfDay(di), to = startOfDay(di + 1);
   const day = DATA.matches.filter(m => m.t >= from && m.t < to);
   const passes = m => !S.onlyTv || visibleChans(m).length > 0 || isFavTeam(m.h) || isFavTeam(m.a);
   const shown = day.filter(passes);
@@ -152,31 +156,67 @@ function renderList() {
       ? `Hay ${day.length} partidos este día, pero ninguno con canal en los idiomas marcados.`
       : "Prueba otro día."}</div>`;
   }
-  el.innerHTML = html;
+  return html;
 }
 $("#list").addEventListener("click", e => {
   const tg = e.target.closest("[data-toggle]");
   if (tg) {
     const k = tg.dataset.toggle;
     S.closed.has(k) ? S.closed.delete(k) : S.closed.add(k);
-    tg.parentElement.classList.toggle("closed"); save(); return;
+    document.querySelectorAll(`.comp[data-ck="${CSS.escape(k)}"]`).forEach(c => c.classList.toggle("closed", S.closed.has(k)));
+    save(); return;
   }
   const mb = e.target.closest("[data-m]");
   if (mb) openMatch(DATA.matches.find(m => m.id === mb.dataset.m));
 });
 
-/* Deslizar para cambiar de día */
-let tx = null, ty = null;
-$("#list").addEventListener("touchstart", e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
-$("#list").addEventListener("touchend", e => {
-  if (tx === null) return;
-  const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
-  tx = null;
-  if (Math.abs(dx) > 70 && Math.abs(dy) < 45) {
-    const n = Math.min(6, Math.max(0, dayIdx + (dx < 0 ? 1 : -1)));
-    if (n !== dayIdx) { dayIdx = n; renderDays(); renderList(); window.scrollTo({ top: 0 }); }
-  }
+/* Deslizar para cambiar de día: la lista sigue al dedo y el día contiguo entra por el lado */
+const swipe = { x: 0, y: 0, t: 0, dx: 0, mode: null, busy: false };
+const track = () => $("#track");
+function setTrack(dx, anim) {
+  track().style.transition = anim ? "transform .28s cubic-bezier(.2,.8,.2,1)" : "none";
+  track().style.transform = dx ? `translate3d(${dx}px,0,0)` : "";
+}
+$("#list").addEventListener("touchstart", e => {
+  if (swipe.busy || e.touches.length > 1) { swipe.mode = "none"; return; }
+  Object.assign(swipe, { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), dx: 0, mode: null });
+  // los paneles laterales se colocan a la altura que se está viendo
+  const off = Math.max(0, window.scrollY - $("#list").offsetTop + $("#top").offsetHeight);
+  for (const id of ["#pane-prev", "#pane-next"]) $(id).style.top = off + "px";
 }, { passive: true });
+$("#list").addEventListener("touchmove", e => {
+  if (swipe.mode === "none" || swipe.mode === "v") return;
+  const dx = e.touches[0].clientX - swipe.x, dy = e.touches[0].clientY - swipe.y;
+  if (!swipe.mode) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    swipe.mode = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+    if (swipe.mode === "v") return;
+  }
+  e.preventDefault();
+  const edge = (dx > 0 && dayIdx === 0) || (dx < 0 && dayIdx === 6);
+  swipe.dx = edge ? dx * 0.25 : dx;
+  setTrack(swipe.dx, false);
+}, { passive: false });
+function endSwipe() {
+  if (swipe.mode !== "h") { swipe.mode = null; return; }
+  swipe.mode = null;
+  const W = $("#list").clientWidth, dx = swipe.dx, v = Math.abs(dx) / Math.max(1, Date.now() - swipe.t);
+  const dir = dx < 0 ? 1 : -1, n = dayIdx + dir;
+  if (n < 0 || n > 6 || (Math.abs(dx) < W * 0.22 && v < 0.45)) { setTrack(0, true); return; }
+  swipe.busy = true;
+  setTrack(-dir * W, true);
+  const done = () => {
+    if (!swipe.busy) return;
+    track().removeEventListener("transitionend", done);
+    dayIdx = n; renderDays(); renderList();
+    setTrack(0, false); window.scrollTo({ top: 0 });
+    swipe.busy = false;
+  };
+  track().addEventListener("transitionend", done);
+  setTimeout(() => { if (swipe.busy) done(); }, 450);
+}
+$("#list").addEventListener("touchend", endSwipe, { passive: true });
+$("#list").addEventListener("touchcancel", endSwipe, { passive: true });
 
 /* ---------- hojas inferiores ---------- */
 function openSheet(html) {

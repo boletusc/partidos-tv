@@ -57,7 +57,12 @@ header#top {
 .flag.tv { font-size: 12px; font-weight: 700; color: var(--text); }
 
 /* Lista */
-main { padding: 8px 10px calc(30px + var(--safe-bot)); min-height: 70vh; }
+main { overflow: hidden; min-height: 70vh; }
+#track { position: relative; will-change: transform; }
+.pane { padding: 8px 10px calc(30px + var(--safe-bot)); }
+.pane.side { position: absolute; top: 0; width: 100%; max-height: 100vh; overflow: hidden; pointer-events: none; }
+#pane-prev { right: 100%; }
+#pane-next { left: 100%; }
 .sec-title {
   margin: 18px 6px 8px; font-size: 13px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .6px; color: var(--muted);
