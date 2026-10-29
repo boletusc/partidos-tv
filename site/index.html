@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Partidos TV</title>
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Partidos">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <div class="bar">
+    <h1>Partidos</h1>
+    <button id="btn-fav" class="icon-btn" aria-label="Favoritos">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 17.3l-6.2 3.7 1.6-7L2 9.3l7.1-.6L12 2l2.9 6.7 7.1.6-5.4 4.7 1.6 7z"/></svg>
+    </button>
+  </div>
+  <nav id="days"></nav>
+  <div id="langs"></div>
+</header>
+<main id="list"></main>
+<footer id="foot"></footer>
+
+<div id="sheet-bg" class="hidden"></div>
+<section id="sheet" class="hidden" role="dialog"></section>
+
+<script src="app.js"></script>
+</body>
+</html>
